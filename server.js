@@ -12,6 +12,19 @@ const supabaseUrl = 'https://mgtpspudobzouvipgdhw.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndHBzcHVkb2J6b3V2aXBnZGh3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDU1OTQ1NiwiZXhwIjoyMTEwMTM1NDU2fQ.FEy5hg8B21h3nSANpZDi1T-P1cNR4jyqTgMjIfOrMwY';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// دالة مساعدة لتسجيل العمليات تلقائياً في جدول audit_logs
+async function logAction(operatorName, actionType, details) {
+    try {
+        await supabase.from('audit_logs').insert([{
+            operator_name: operatorName || 'Master Admin',
+            action_type: actionType,
+            details: details
+        }]);
+    } catch (err) {
+        console.error('خطأ أثناء تسجيل العمليات:', err.message);
+    }
+}
+
 // المسار الجذري
 app.get('/', (req, res) => {
     res.status(200).json({ 
@@ -33,12 +46,16 @@ app.get(['/channels', '/api/channels'], async (req, res) => {
 
 app.post(['/channels', '/api/channels'], async (req, res) => {
     try {
-        const { name, category, primary_url, alt_url_1, alt_url_2, alt_url_3 } = req.body;
+        const { name, category, primary_url, alt_url_1, alt_url_2, alt_url_3, operator_name } = req.body;
         const { data, error } = await supabase
             .from('channels')
             .insert([{ name, category, primary_url, alt_url_1, alt_url_2, alt_url_3 }]);
         
         if (error) throw error;
+        
+        // تسجيل الحدث في السجل
+        await logAction(operator_name, 'إضافة قناة', `أضاف القناة: ${name}`);
+
         res.json({ success: true, message: 'تم إضافة القناة بنجاح', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -58,9 +75,12 @@ app.get(['/categories', '/api/categories'], async (req, res) => {
 
 app.post(['/categories', '/api/categories'], async (req, res) => {
     try {
-        const { name } = req.body;
+        const { name, operator_name } = req.body;
         const { data, error } = await supabase.from('categories').insert([{ name }]);
         if (error) throw error;
+
+        await logAction(operator_name, 'إضافة تصنيف', `أضاف التصنيف: ${name}`);
+
         res.json({ success: true, message: 'تم إضافة التصنيف بنجاح', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -70,8 +90,12 @@ app.post(['/categories', '/api/categories'], async (req, res) => {
 app.delete(['/categories/:id', '/api/categories/:id'], async (req, res) => {
     try {
         const { id } = req.params;
+        const { operator_name } = req.body || {};
         const { error } = await supabase.from('categories').delete().eq('id', id);
         if (error) throw error;
+
+        await logAction(operator_name, 'حذف تصنيف', `حذف التصنيف برقم ID: ${id}`);
+
         res.json({ success: true, message: 'تم حذف التصنيف بنجاح' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -81,7 +105,7 @@ app.delete(['/categories/:id', '/api/categories/:id'], async (req, res) => {
 // 3. مسار توليد وحفظ كود التفعيل في Supabase
 app.post(['/generate-code', '/api/generate-code'], async (req, res) => {
     try {
-        const { duration, max_devices } = req.body;
+        const { duration, max_devices, operator_name } = req.body;
         
         const randomCode = 'HATV-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
         
@@ -101,13 +125,16 @@ app.post(['/generate-code', '/api/generate-code'], async (req, res) => {
             .select();
 
         if (error) throw error;
+
+        await logAction(operator_name, 'توليد كود', `ولّد كود تفعيل جديد: ${randomCode} لمدة ${duration} يوم`);
+
         res.json({ success: true, message: 'تم توليد وحفظ الكود بنجاح', code: randomCode, data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
-// 4. مسار التحقق من أكواد التفعيل وتجسيل الجهاز المستخدم
+// 4. مسار التحقق من أكواد التفعيل وتسجيل الجهاز المستخدم
 app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
     try {
         const { code, device_id } = req.body;
@@ -160,13 +187,17 @@ app.get(['/admin/codes', '/api/admin/codes'], async (req, res) => {
 // 6. مسار إدارة وحظر أو تفعيل كود محدد عن بعد
 app.post(['/admin/toggle-code-block', '/api/admin/toggle-code-block'], async (req, res) => {
     try {
-        const { id, is_blocked } = req.body;
+        const { id, is_blocked, operator_name } = req.body;
         const { data, error } = await supabase
             .from('activation_codes')
             .update({ is_blocked })
             .eq('id', id)
             .select();
         if (error) throw error;
+
+        const actionText = is_blocked ? 'حظر كود تفعيل' : 'تفعيل كود تفعيل';
+        await logAction(operator_name, actionText, `تم تغيير حالة الكود ID: ${id} إلى (محظور: ${is_blocked})`);
+
         res.json({ success: true, message: 'تم تحديث حالة الكود بنجاح', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -186,12 +217,15 @@ app.get(['/operators', '/api/operators'], async (req, res) => {
 
 app.post(['/operators', '/api/operators'], async (req, res) => {
     try {
-        const { name, password, role } = req.body;
+        const { name, password, role, operator_name } = req.body;
         const { data, error } = await supabase
             .from('operators')
             .insert([{ name, password, role, is_active: true }])
             .select();
         if (error) throw error;
+
+        await logAction(operator_name, 'إضافة مشغل', `أنشأ حساب مشغل جديد باسم: ${name} بصلاحية (${role})`);
+
         res.json({ success: true, message: 'تم إضافة المشغل بنجاح', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -200,13 +234,16 @@ app.post(['/operators', '/api/operators'], async (req, res) => {
 
 app.post(['/operators/toggle', '/api/operators/toggle'], async (req, res) => {
     try {
-        const { id, is_active } = req.body;
+        const { id, is_active, operator_name } = req.body;
         const { data, error } = await supabase
             .from('operators')
             .update({ is_active })
             .eq('id', id)
             .select();
         if (error) throw error;
+
+        await logAction(operator_name, 'تعديل مشغل', `قام بتغيير حالة حساب المشغل ID: ${id} إلى (نشط: ${is_active})`);
+
         res.json({ success: true, message: 'تم تحديث حالة المشغل', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -231,7 +268,24 @@ app.post(['/operator-login', '/api/operator-login'], async (req, res) => {
             return res.status(403).json({ success: false, message: 'عذراً، هذا الحساب موقوف من قبل الإدارة' });
         }
 
+        await logAction(name, 'تسجيل دخول', `قام المشغل ${name} بتسجيل الدخول بنجاح`);
+
         res.json({ success: true, message: 'تم تسجيل الدخول بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 8. مسارات جلب سجل العمليات (Audit Logs)
+app.get(['/audit-logs', '/api/audit-logs'], async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('audit_logs')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
+        if (error) throw error;
+        res.json({ success: true, data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
