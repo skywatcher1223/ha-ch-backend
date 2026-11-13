@@ -78,7 +78,37 @@ app.delete(['/categories/:id', '/api/categories/:id'], async (req, res) => {
     }
 });
 
-// 3. مسار التحقق من أكواد التفعيل
+// 3. مسار توليد وحفظ كود التفعيل في Supabase
+app.post(['/generate-code', '/api/generate-code'], async (req, res) => {
+    try {
+        const { duration, max_devices } = req.body;
+        
+        // توليد كود عشوائي فريد
+        const randomCode = 'HATV-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+        
+        // حساب تاريخ الإنتهاء بناءً على عدد الأيام
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + parseInt(duration || 30));
+
+        const { data, error } = await supabase
+            .from('activation_codes')
+            .insert([{
+                code: randomCode,
+                duration_days: parseInt(duration),
+                max_devices: parseInt(max_devices || 1),
+                status: 'active',
+                expires_at: expiresAt.toISOString()
+            }])
+            .select();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'تم توليد وحفظ الكود بنجاح', code: randomCode, data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 4. مسار التحقق من أكواد التفعيل
 app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
     try {
         const { code } = req.body;
