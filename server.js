@@ -45,7 +45,7 @@ app.post(['/channels', '/api/channels'], async (req, res) => {
     }
 });
 
-// 2. مسارات التصنيفات (Categories - جلب، إضافة، وحذف)
+// 2. مسارات التصنيفات (Categories)
 app.get(['/categories', '/api/categories'], async (req, res) => {
     try {
         const { data, error } = await supabase.from('categories').select('*');
@@ -83,10 +83,8 @@ app.post(['/generate-code', '/api/generate-code'], async (req, res) => {
     try {
         const { duration, max_devices } = req.body;
         
-        // توليد كود عشوائي فريد
         const randomCode = 'HATV-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
         
-        // حساب تاريخ الإنتهاء بناءً على عدد الأيام
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + parseInt(duration || 30));
 
@@ -97,6 +95,7 @@ app.post(['/generate-code', '/api/generate-code'], async (req, res) => {
                 duration_days: parseInt(duration),
                 max_devices: parseInt(max_devices || 1),
                 status: 'active',
+                is_blocked: false,
                 expires_at: expiresAt.toISOString()
             }])
             .select();
@@ -108,10 +107,10 @@ app.post(['/generate-code', '/api/generate-code'], async (req, res) => {
     }
 });
 
-// 4. مسار التحقق من أكواد التفعيل
+// 4. مسار التحقق من أكواد التفعيل وتجسيل الجهاز المستخدم
 app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
     try {
-        const { code } = req.body;
+        const { code, device_id } = req.body;
         const { data, error } = await supabase
             .from('activation_codes')
             .select('*')
@@ -122,11 +121,55 @@ app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
             return res.status(404).json({ success: false, message: 'كود التفعيل غير صالح أو غير موجود' });
         }
 
+        // التحقق مما إذا كان الكود محظوراً أو معطلاً من الإدارة
+        if (data.is_blocked) {
+            return res.status(403).json({ success: false, message: 'عذراً، هذا الكود تم تعطيله أو حظره من قبل الإدارة' });
+        }
+
         if (data.status === 'expired') {
             return res.status(400).json({ success: false, message: 'عذراً، هذا الكود منتهي الصلاحية' });
         }
 
+        // تسجيل الجهاز وقت الاستخدام وتحديث آخر ظهور
+        await supabase
+            .from('activation_codes')
+            .update({ 
+                used_by_device: device_id || 'جهاز مستخدم', 
+                last_login_at: new Date() 
+            })
+            .eq('code', code);
+
         res.json({ success: true, message: 'تم تفعيل التطبيق بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 5. مسارات الإدارة: جلب كافة الأكواد ومن يستعملها
+app.get(['/admin/codes', '/api/admin/codes'], async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('activation_codes')
+            .select('*')
+            .order('id', { ascending: false });
+        if (error) throw error;
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 6. مسار إدارة وحظر أو تفعيل كود محدد عن بعد
+app.post(['/admin/toggle-code-block', '/api/admin/toggle-code-block'], async (req, res) => {
+    try {
+        const { id, is_blocked } = req.body;
+        const { data, error } = await supabase
+            .from('activation_codes')
+            .update({ is_blocked })
+            .eq('id', id)
+            .select();
+        if (error) throw error;
+        res.json({ success: true, message: 'تم تحديث حالة الكود بنجاح', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
