@@ -7,10 +7,18 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// الاتصال بقاعدة بيانات Supabase (باستخدام القيم المباشرة الصحيحة التي وضعتها)
+// الاتصال بقاعدة بيانات Supabase (باستخدام القيم المباشرة الصحيحة)
 const supabaseUrl = 'https://mgtpspudobzouvipgdhw.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndHBzcHVkb2J6b3V2aXBnZGh3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDU1OTQ1NiwiZXhwIjoyMTEwMTM1NDU2fQ.FEy5hg8B21h3nSANpZDi1T-P1cNR4jyqTgMjIfOrMwY';
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// 0. المسار الجذري (لتجنب ظهور خطأ Cannot GET / عند فتح رابط السيرفر)
+app.get('/', (req, res) => {
+    res.status(200).json({ 
+        status: 'success', 
+        message: '🚀 HA TV Backend is running successfully!' 
+    });
+});
 
 // 1. مسار لجلب جميع القنوات والبدائل (يستخدمه تطبيق Flutter ولوحة التحكم)
 app.get('/api/channels', async (req, res) => {
