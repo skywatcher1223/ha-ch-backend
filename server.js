@@ -45,7 +45,7 @@ app.post(['/channels', '/api/channels'], async (req, res) => {
     }
 });
 
-// 2. مسارات التصنيفات (Categories)
+// 2. مسارات التصنيفات (Categories - جلب، إضافة، وحذف)
 app.get(['/categories', '/api/categories'], async (req, res) => {
     try {
         const { data, error } = await supabase.from('categories').select('*');
@@ -62,6 +62,17 @@ app.post(['/categories', '/api/categories'], async (req, res) => {
         const { data, error } = await supabase.from('categories').insert([{ name }]);
         if (error) throw error;
         res.json({ success: true, message: 'تم إضافة التصنيف بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete(['/categories/:id', '/api/categories/:id'], async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { error } = await supabase.from('categories').delete().eq('id', id);
+        if (error) throw error;
+        res.json({ success: true, message: 'تم حذف التصنيف بنجاح' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
