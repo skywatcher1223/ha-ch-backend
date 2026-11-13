@@ -53,7 +53,6 @@ app.post(['/channels', '/api/channels'], async (req, res) => {
         
         if (error) throw error;
         
-        // تسجيل الحدث في السجل
         await logAction(operator_name, 'إضافة قناة', `أضاف القناة: ${name}`);
 
         res.json({ success: true, message: 'تم إضافة القناة بنجاح', data });
@@ -204,6 +203,29 @@ app.post(['/admin/toggle-code-block', '/api/admin/toggle-code-block'], async (re
     }
 });
 
+// 6.1 مسار تصفير الجهاز المرتبط بكود التفعيل (ميزة جديدة)
+app.post(['/admin/reset-device', '/api/admin/reset-device'], async (req, res) => {
+    try {
+        const { id, operator_name } = req.body;
+        const { data, error } = await supabase
+            .from('activation_codes')
+            .update({ 
+                used_by_device: null, 
+                last_login_at: null 
+            })
+            .eq('id', id)
+            .select();
+
+        if (error) throw error;
+
+        await logAction(operator_name, 'تصفير جهاز', `تم تصفير الجهاز المرتبط بالكود ID: ${id}`);
+
+        res.json({ success: true, message: 'تم تصفير الجهاز المرتبط بالكود بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // 7. مسارات إدارة المشغلين (Operators)
 app.get(['/operators', '/api/operators'], async (req, res) => {
     try {
@@ -292,7 +314,7 @@ app.get(['/audit-logs', '/api/audit-logs'], async (req, res) => {
 });
 
 // ==========================================
-// 9. مسارات الإحصائيات (Dashboard Analytics) الجديدة
+// 9. مسارات الإحصائيات (Dashboard Analytics)
 // ==========================================
 app.get(['/api/stats', '/stats'], async (req, res) => {
     try {
@@ -326,7 +348,7 @@ app.get(['/api/stats', '/stats'], async (req, res) => {
 });
 
 // ==========================================
-// 10. مسارات نظام الإشعارات المتقدمة الجديدة
+// 10. مسارات نظام الإشعارات المتقدمة
 // ==========================================
 app.get(['/api/notifications', '/notifications'], async (req, res) => {
     try {
@@ -360,7 +382,7 @@ app.post(['/api/notifications', '/notifications'], async (req, res) => {
 });
 
 // ==========================================
-// 11. مسارات جدول المباريات والـ EPG الجديدة
+// 11. مسارات جدول المباريات والـ EPG
 // ==========================================
 app.get(['/api/matches', '/matches'], async (req, res) => {
     try {
