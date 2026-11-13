@@ -203,7 +203,7 @@ app.post(['/admin/toggle-code-block', '/api/admin/toggle-code-block'], async (re
     }
 });
 
-// 6.1 مسار تصفير الجهاز المرتبط بكود التفعيل (ميزة جديدة)
+// 6.1 مسار تصفير الجهاز المرتبط بكود التفعيل
 app.post(['/admin/reset-device', '/api/admin/reset-device'], async (req, res) => {
     try {
         const { id, operator_name } = req.body;
@@ -221,6 +221,59 @@ app.post(['/admin/reset-device', '/api/admin/reset-device'], async (req, res) =>
         await logAction(operator_name, 'تصفير جهاز', `تم تصفير الجهاز المرتبط بالكود ID: ${id}`);
 
         res.json({ success: true, message: 'تم تصفير الجهاز المرتبط بالكود بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 6.2 مسار أداة فحص سلامة روابط البث تلقائياً (أداة جديدة)
+app.post(['/api/admin/check-streams', '/admin/check-streams'], async (req, res) => {
+    try {
+        const { operator_name } = req.body;
+        
+        const { data: channels, error } = await supabase.from('channels').select('*');
+        if (error) throw error;
+
+        let results = [];
+
+        for (let ch of channels) {
+            let channelStatus = 'offline';
+            let responseTime = 0;
+            let startTime = Date.now();
+
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+                const response = await fetch(ch.primary_url, { 
+                    method: 'GET', 
+                    signal: controller.signal,
+                    headers: { 'Range': 'bytes=0-100' }
+                });
+                
+                clearTimeout(timeoutId);
+
+                if (response.ok || response.status === 206) {
+                    channelStatus = 'online';
+                    responseTime = Date.now() - startTime;
+                }
+            } catch (err) {
+                channelStatus = 'offline';
+            }
+
+            await supabase.from('channel_health_logs').insert([{
+                channel_id: ch.id,
+                channel_name: ch.name,
+                status: channelStatus,
+                response_time_ms: responseTime
+            }]);
+
+            results.push({ id: ch.id, name: ch.name, status: channelStatus, response_time_ms: responseTime });
+        }
+
+        await logAction(operator_name || 'Master Admin', 'فحص الروابط', 'أجرى فحصاً دورياً لسلامة وصلاحية روابط البث');
+
+        res.json({ success: true, message: 'تم فحص جميع القنوات بنجاح', data: results });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
