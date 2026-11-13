@@ -7,12 +7,12 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// الاتصال بقاعدة بيانات Supabase (باستخدام القيم المباشرة الصحيحة)
+// الاتصال بقاعدة بيانات Supabase
 const supabaseUrl = 'https://mgtpspudobzouvipgdhw.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndHBzcHVkb2J6b3V2aXBnZGh3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDU1OTQ1NiwiZXhwIjoyMTEwMTM1NDU2fQ.FEy5hg8B21h3nSANpZDi1T-P1cNR4jyqTgMjIfOrMwY';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// 0. المسار الجذري
+// المسار الجذري
 app.get('/', (req, res) => {
     res.status(200).json({ 
         status: 'success', 
@@ -20,7 +20,7 @@ app.get('/', (req, res) => {
     });
 });
 
-// 1. مسار جلب جميع القنوات (يدعم المسارين /channels و /api/channels لتوافق تام مع لوحة التحكم وFlutter)
+// 1. مسارات القنوات
 app.get(['/channels', '/api/channels'], async (req, res) => {
     try {
         const { data, error } = await supabase.from('channels').select('*');
@@ -31,7 +31,6 @@ app.get(['/channels', '/api/channels'], async (req, res) => {
     }
 });
 
-// 2. مسار إضافة قناة جديدة (يدعم المسارين /channels و /api/channels)
 app.post(['/channels', '/api/channels'], async (req, res) => {
     try {
         const { name, category, primary_url, alt_url_1, alt_url_2, alt_url_3 } = req.body;
@@ -46,7 +45,29 @@ app.post(['/channels', '/api/channels'], async (req, res) => {
     }
 });
 
-// 3. مسار التحقق من أكواد التفعيل الخاصة بالمشتركين
+// 2. مسارات التصنيفات (Categories)
+app.get(['/categories', '/api/categories'], async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('categories').select('*');
+        if (error) throw error;
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post(['/categories', '/api/categories'], async (req, res) => {
+    try {
+        const { name } = req.body;
+        const { data, error } = await supabase.from('categories').insert([{ name }]);
+        if (error) throw error;
+        res.json({ success: true, message: 'تم إضافة التصنيف بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 3. مسار التحقق من أكواد التفعيل
 app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
     try {
         const { code } = req.body;
@@ -70,7 +91,7 @@ app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
     }
 });
 
-// تشغيل الخادم على المنفذ المحدد
+// تشغيل الخادم
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 HA TV Backend running successfully on port ${PORT}`);
