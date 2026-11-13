@@ -121,7 +121,6 @@ app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
             return res.status(404).json({ success: false, message: 'كود التفعيل غير صالح أو غير موجود' });
         }
 
-        // التحقق مما إذا كان الكود محظوراً أو معطلاً من الإدارة
         if (data.is_blocked) {
             return res.status(403).json({ success: false, message: 'عذراً، هذا الكود تم تعطيله أو حظره من قبل الإدارة' });
         }
@@ -130,7 +129,6 @@ app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
             return res.status(400).json({ success: false, message: 'عذراً، هذا الكود منتهي الصلاحية' });
         }
 
-        // تسجيل الجهاز وقت الاستخدام وتحديث آخر ظهور
         await supabase
             .from('activation_codes')
             .update({ 
@@ -170,6 +168,70 @@ app.post(['/admin/toggle-code-block', '/api/admin/toggle-code-block'], async (re
             .select();
         if (error) throw error;
         res.json({ success: true, message: 'تم تحديث حالة الكود بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 7. مسارات إدارة المشغلين (Operators)
+app.get(['/operators', '/api/operators'], async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('operators').select('*').order('id', { ascending: false });
+        if (error) throw error;
+        res.json({ success: true, data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post(['/operators', '/api/operators'], async (req, res) => {
+    try {
+        const { name, password, role } = req.body;
+        const { data, error } = await supabase
+            .from('operators')
+            .insert([{ name, password, role, is_active: true }])
+            .select();
+        if (error) throw error;
+        res.json({ success: true, message: 'تم إضافة المشغل بنجاح', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post(['/operators/toggle', '/api/operators/toggle'], async (req, res) => {
+    try {
+        const { id, is_active } = req.body;
+        const { data, error } = await supabase
+            .from('operators')
+            .update({ is_active })
+            .eq('id', id)
+            .select();
+        if (error) throw error;
+        res.json({ success: true, message: 'تم تحديث حالة المشغل', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post(['/operator-login', '/api/operator-login'], async (req, res) => {
+    try {
+        const { name, password } = req.body;
+        const { data, error } = await supabase
+            .from('operators')
+            .select('*')
+            .eq('name', name)
+            .eq('password', password)
+            .single();
+
+        if (error || !data) {
+            return res.status(401).json({ success: false, message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+        }
+
+        if (!data.is_active) {
+            return res.status(403).json({ success: false, message: 'عذراً، هذا الحساب موقوف من قبل الإدارة' });
+        }
+
+        res.json({ success: true, message: 'تم تسجيل الدخول بنجاح', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
