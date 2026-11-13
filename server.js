@@ -12,7 +12,7 @@ const supabaseUrl = 'https://mgtpspudobzouvipgdhw.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndHBzcHVkb2J6b3V2aXBnZGh3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDU1OTQ1NiwiZXhwIjoyMTEwMTM1NDU2fQ.FEy5hg8B21h3nSANpZDi1T-P1cNR4jyqTgMjIfOrMwY';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// 0. المسار الجذري (لتجنب ظهور خطأ Cannot GET / عند فتح رابط السيرفر)
+// 0. المسار الجذري
 app.get('/', (req, res) => {
     res.status(200).json({ 
         status: 'success', 
@@ -20,8 +20,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// 1. مسار لجلب جميع القنوات والبدائل (يستخدمه تطبيق Flutter ولوحة التحكم)
-app.get('/api/channels', async (req, res) => {
+// 1. مسار جلب جميع القنوات (يدعم المسارين /channels و /api/channels لتوافق تام مع لوحة التحكم وFlutter)
+app.get(['/channels', '/api/channels'], async (req, res) => {
     try {
         const { data, error } = await supabase.from('channels').select('*');
         if (error) throw error;
@@ -31,8 +31,8 @@ app.get('/api/channels', async (req, res) => {
     }
 });
 
-// 2. مسار لإضافة قناة جديدة مع بدائل البث
-app.post('/api/channels', async (req, res) => {
+// 2. مسار إضافة قناة جديدة (يدعم المسارين /channels و /api/channels)
+app.post(['/channels', '/api/channels'], async (req, res) => {
     try {
         const { name, category, primary_url, alt_url_1, alt_url_2, alt_url_3 } = req.body;
         const { data, error } = await supabase
@@ -46,8 +46,8 @@ app.post('/api/channels', async (req, res) => {
     }
 });
 
-// 3. مسار للتحقق من أكواد التفعيل الخاصة بالمشتركين
-app.post('/api/verify-code', async (req, res) => {
+// 3. مسار التحقق من أكواد التفعيل الخاصة بالمشتركين
+app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
     try {
         const { code } = req.body;
         const { data, error } = await supabase
