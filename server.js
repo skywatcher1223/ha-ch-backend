@@ -2,14 +2,19 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
+const registerHealthRoutes = require('./health-check');
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// الاتصال بقاعدة بيانات Supabase
-const supabaseUrl = 'https://mgtpspudobzouvipgdhw.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndHBzcHVkb2J6b3V2aXBnZGh3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDU1OTQ1NiwiZXhwIjoyMTEwMTM1NDU2fQ.FEy5hg8B21h3nSANpZDi1T-P1cNR4jyqTgMjIfOrMwY';
+// الاتصال بقاعدة بيانات Supabase — القيم تُقرأ من متغيرات البيئة (لا تكتب المفتاح داخل الكود)
+const supabaseUrl = https://mgtpspudobzouvipgdhw.supabase.co;
+const supabaseKey = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndHBzcHVkb2J6b3V2aXBnZGh3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDU1OTQ1NiwiZXhwIjoyMTEwMTM1NDU2fQ.FEy5hg8B21h3nSANpZDi1T-P1cNR4jyqTgMjIfOrMwY;
+if (!supabaseUrl || !supabaseKey) {
+    console.error('❌ يجب ضبط SUPABASE_URL و SUPABASE_KEY في متغيرات البيئة (Render → Environment).');
+    process.exit(1);
+}
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // دالة مساعدة لتسجيل العمليات تلقائياً في جدول audit_logs
@@ -25,11 +30,17 @@ async function logAction(operatorName, actionType, details) {
     }
 }
 
+// هل انتهت صلاحية الكود فعلياً؟ (حسب التاريخ وليس فقط حقل status)
+function isExpired(code) {
+    if (code.status === 'expired') return true;
+    return !!(code.expires_at && new Date(code.expires_at).getTime() < Date.now());
+}
+
 // المسار الجذري
 app.get('/', (req, res) => {
-    res.status(200).json({ 
-        status: 'success', 
-        message: '🚀 HA TV Backend is running successfully!' 
+    res.status(200).json({
+        status: 'success',
+        message: '🚀 HA TV Backend is running successfully!'
     });
 });
 
@@ -50,9 +61,9 @@ app.post(['/channels', '/api/channels'], async (req, res) => {
         const { data, error } = await supabase
             .from('channels')
             .insert([{ name, category, primary_url, alt_url_1, alt_url_2, alt_url_3 }]);
-        
+
         if (error) throw error;
-        
+
         await logAction(operator_name, 'إضافة قناة', `أضاف القناة: ${name}`);
 
         res.json({ success: true, message: 'تم إضافة القناة بنجاح', data });
@@ -105,9 +116,9 @@ app.delete(['/categories/:id', '/api/categories/:id'], async (req, res) => {
 app.post(['/generate-code', '/api/generate-code'], async (req, res) => {
     try {
         const { duration, max_devices, operator_name } = req.body;
-        
+
         const randomCode = 'HATV-' + Math.random().toString(36).substring(2, 8).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-        
+
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + parseInt(duration || 30));
 
@@ -151,15 +162,19 @@ app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
             return res.status(403).json({ success: false, message: 'عذراً، هذا الكود تم تعطيله أو حظره من قبل الإدارة' });
         }
 
-        if (data.status === 'expired') {
+        // التحقق من انتهاء الصلاحية حسب التاريخ الفعلي
+        if (isExpired(data)) {
+            if (data.status !== 'expired') {
+                await supabase.from('activation_codes').update({ status: 'expired' }).eq('id', data.id);
+            }
             return res.status(400).json({ success: false, message: 'عذراً، هذا الكود منتهي الصلاحية' });
         }
 
         await supabase
             .from('activation_codes')
-            .update({ 
-                used_by_device: device_id || 'جهاز مستخدم', 
-                last_login_at: new Date() 
+            .update({
+                used_by_device: device_id || 'جهاز مستخدم',
+                last_login_at: new Date()
             })
             .eq('code', code);
 
@@ -169,7 +184,7 @@ app.post(['/verify-code', '/api/verify-code'], async (req, res) => {
     }
 });
 
-// 5. مسارات الإدارة: جلب كافة الأكواد ومن يستعملها
+// 5. مسارات الإدارة: جلب كافة الأكواد ومن يستعملها (الحالة تُحسب من تاريخ الانتهاء الفعلي)
 app.get(['/admin/codes', '/api/admin/codes'], async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -177,7 +192,8 @@ app.get(['/admin/codes', '/api/admin/codes'], async (req, res) => {
             .select('*')
             .order('id', { ascending: false });
         if (error) throw error;
-        res.json({ success: true, data });
+        const withStatus = data.map(c => ({ ...c, status: isExpired(c) ? 'expired' : 'active' }));
+        res.json({ success: true, data: withStatus });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -209,9 +225,9 @@ app.post(['/admin/reset-device', '/api/admin/reset-device'], async (req, res) =>
         const { id, operator_name } = req.body;
         const { data, error } = await supabase
             .from('activation_codes')
-            .update({ 
-                used_by_device: null, 
-                last_login_at: null 
+            .update({
+                used_by_device: null,
+                last_login_at: null
             })
             .eq('id', id)
             .select();
@@ -226,56 +242,23 @@ app.post(['/admin/reset-device', '/api/admin/reset-device'], async (req, res) =>
     }
 });
 
-// 6.2 مسار أداة فحص سلامة روابط البث تلقائياً (أداة جديدة)
-app.post(['/api/admin/check-streams', '/admin/check-streams'], async (req, res) => {
-    try {
-        const { operator_name } = req.body;
-        
-        const { data: channels, error } = await supabase.from('channels').select('*');
+// 6.2 فحص سلامة روابط البث — فحص حقيقي (HLS + جلب مقطع فعلي) في ملف health-check.js
+//     يسجّل النتائج في جدول channel_health_logs ويضيف /admin/check-stream لفحص قناة واحدة
+registerHealthRoutes(app, {
+    getChannels: async () => {
+        const { data, error } = await supabase.from('channels').select('id, name, primary_url');
         if (error) throw error;
-
-        let results = [];
-
-        for (let ch of channels) {
-            let channelStatus = 'offline';
-            let responseTime = 0;
-            let startTime = Date.now();
-
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-                const response = await fetch(ch.primary_url, { 
-                    method: 'GET', 
-                    signal: controller.signal,
-                    headers: { 'Range': 'bytes=0-100' }
-                });
-                
-                clearTimeout(timeoutId);
-
-                if (response.ok || response.status === 206) {
-                    channelStatus = 'online';
-                    responseTime = Date.now() - startTime;
-                }
-            } catch (err) {
-                channelStatus = 'offline';
-            }
-
-            await supabase.from('channel_health_logs').insert([{
-                channel_id: ch.id,
-                channel_name: ch.name,
-                status: channelStatus,
-                response_time_ms: responseTime
-            }]);
-
-            results.push({ id: ch.id, name: ch.name, status: channelStatus, response_time_ms: responseTime });
-        }
-
-        await logAction(operator_name || 'Master Admin', 'فحص الروابط', 'أجرى فحصاً دورياً لسلامة وصلاحية روابط البث');
-
-        res.json({ success: true, message: 'تم فحص جميع القنوات بنجاح', data: results });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
+        return data;
+    },
+    logAudit: (operator, action, details) => logAction(operator, 'فحص الروابط', details),
+    saveResults: async (results) => {
+        const rows = results.map(r => ({
+            channel_id: r.id,
+            channel_name: r.name,
+            status: r.status,
+            response_time_ms: r.response_time_ms || 0
+        }));
+        if (rows.length) await supabase.from('channel_health_logs').insert(rows);
     }
 });
 
@@ -369,21 +352,27 @@ app.get(['/audit-logs', '/api/audit-logs'], async (req, res) => {
 // ==========================================
 // 9. مسارات الإحصائيات (Dashboard Analytics)
 // ==========================================
+const ACTIVE_WINDOW_MIN = 30; // الجهاز يُعدّ نشطاً إذا سجّل دخوله خلال آخر 30 دقيقة
+
 app.get(['/api/stats', '/stats'], async (req, res) => {
     try {
         const { count: channelsCount, error: chError } = await supabase
             .from('channels')
             .select('*', { count: 'exact', head: true });
-        
+
         const { data: codesData, error: codesError } = await supabase
             .from('activation_codes')
-            .select('is_blocked, status');
+            .select('is_blocked, status, expires_at, last_login_at');
 
         if (chError || codesError) throw new Error('فشل جلب إحصائيات قاعدة البيانات');
 
-        let totalCodes = codesData.length;
-        let activeCodes = codesData.filter(c => !c.is_blocked && c.status === 'active').length;
-        let blockedCodes = codesData.filter(c => c.is_blocked).length;
+        const since = Date.now() - ACTIVE_WINDOW_MIN * 60 * 1000;
+        const totalCodes = codesData.length;
+        const activeCodes = codesData.filter(c => !c.is_blocked && !isExpired(c)).length;
+        const blockedCodes = codesData.filter(c => c.is_blocked).length;
+        // رقم حقيقي: عدد الأجهزة التي سجّلت نشاطاً مؤخراً (بدل الرقم العشوائي السابق)
+        const recentlyActive = codesData.filter(c =>
+            !c.is_blocked && c.last_login_at && new Date(c.last_login_at).getTime() >= since).length;
 
         res.json({
             success: true,
@@ -392,7 +381,7 @@ app.get(['/api/stats', '/stats'], async (req, res) => {
                 total_codes: totalCodes,
                 active_codes: activeCodes,
                 blocked_codes: blockedCodes,
-                active_streams: Math.floor(Math.random() * 40) + 10
+                active_streams: recentlyActive
             }
         });
     } catch (err) {
