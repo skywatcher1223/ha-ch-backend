@@ -14,8 +14,8 @@ const corsOrigins = (process.env.CORS_ORIGIN || '').split(',').map(x => x.trim()
 app.use(cors(corsOrigins.length ? { origin: corsOrigins } : {}));
 
 // ================= المصادقة =================
-const ADMIN_KEY = process.env.ADMIN_KEY;       // المفتاح الرئيسي للمدير (يُكتب في خانة اسم المستخدم)
-const AUTH_SECRET = process.env.AUTH_SECRET;   // سر توقيع التوكن (نص عشوائي طويل)
+const ADMIN_KEY = 'HA_TV_ADMIN_chaouki_1920';       // المفتاح الرئيسي للمدير (يُكتب في خانة اسم المستخدم)
+const AUTH_SECRET = 'OYy1yHjmCZogGn5p1LSyFgnKlGapUAJobsqHYwwxPD6BZLEd';   // سر توقيع التوكن (نص عشوائي طويل)
 if (!ADMIN_KEY || !AUTH_SECRET) {
     console.error('❌ يجب ضبط ADMIN_KEY و AUTH_SECRET في متغيرات البيئة (Render → Environment).');
     process.exit(1);
@@ -133,8 +133,8 @@ app.use(async (req, res, next) => {
 });
 
 // الاتصال بقاعدة بيانات Supabase — القيم تُقرأ من متغيرات البيئة (لا تكتب المفتاح داخل الكود)
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseUrl = 'https://mgtpspudobzouvipgdhw.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ndHBzcHVkb2J6b3V2aXBnZGh3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDU1OTQ1NiwiZXhwIjoyMTEwMTM1NDU2fQ.FEy5hg8B21h3nSANpZDi1T-P1cNR4jyqTgMjIfOrMwY';
 if (!supabaseUrl || !supabaseKey) {
     console.error('❌ يجب ضبط SUPABASE_URL و SUPABASE_KEY في متغيرات البيئة (Render → Environment).');
     process.exit(1);
