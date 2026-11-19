@@ -56,6 +56,7 @@ async function checkPw(pw, stored) {
 // جلب الشعارات تلقائياً من iptv-org (الملف logo-finder.js بجانب server.js)
 let logoFinder = null;
 try { logoFinder = require('./logo-finder'); } catch (e) { console.warn('logo-finder.js غير موجود: الشعارات التلقائية معطلة'); }
+
 // جلب كل الصفوف على دفعات (Supabase يعيد 1000 صف كحد أقصى في الطلب الواحد)
 async function fetchAll(build) {
     const out = [];
@@ -67,6 +68,7 @@ async function fetchAll(build) {
     }
     return out;
 }
+
 // تنبيهات تلغرام (اختياري): TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN, TG_CHAT = process.env.TELEGRAM_CHAT_ID;
 const tgLast = new Map();
@@ -83,6 +85,7 @@ async function notifyTG(text, key) {
     } catch (e) { return false; }
 }
 process.on('unhandledRejection', (e) => { console.error('unhandledRejection:', e && e.message); notifyTG('❗ خطأ غير معالج في السيرفر: ' + (e && e.message), 'unhandled'); });
+
 const opCache = new Map(); // حالة المشغلين (تُحدَّث كل 15 ثانية)
 const linkStatus = new Map(); // نتائج فحص الروابط (للتبديل التلقائي)
 const makeLimiter = (max, windowMs) => {
@@ -206,6 +209,16 @@ function isExpired(code) {
 // لا نُرجع كلمة مرور المشغل للمتصفح أبداً
 const safeOp = (o) => { if (!o) return o; const { password, ...rest } = o; return rest; };
 
+// تطبيع النص العربي لتسهيل البحث المطابق لتطبيق Flutter
+function normAr(input) {
+    return String(input || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[إأآا]/g, 'ا')
+        .replace(/ى/g, 'ي')
+        .replace(/ة/g, 'ه');
+}
+
 // المسار الجذري
 app.get('/', (req, res) => {
     res.status(200).json({
@@ -225,6 +238,7 @@ function vodMeta(it) {
     if (/^[a-z]{2,3}$/.test(l)) m.lang = l;
     return m;
 }
+
 // ---- الأفلام والمسلسلات (VOD): تُعرَّف بتصنيف يبدأ بـ «أفلام» أو «مسلسلات» (كما ينشئها صانع الباقات) ----
 const VOD_CAT = /^\s*(أفلام|افلام|مسلسلات|movies?|series|vod)(\s|\||-|$)/i;
 const isVodCat = (cat) => VOD_CAT.test(String(cat || ''));
@@ -233,6 +247,7 @@ let vodLoading = null;
 const viewSeen = new Map(); // تقييد عدّاد المشاهدات: مرة لكل جهاز وعنصر كل 30 دقيقة
 const VOD_OR = 'category.ilike.أفلام%,category.ilike.افلام%,category.ilike.مسلسلات%,category.ilike.movie%,category.ilike.series%,category.ilike.vod%';
 const VOD_COLS = [
+    'id, name, category, logo_url, primary_url, alt_url_1, alt_url_2, alt_url_3, status, year, rating, lang, views, plot, backdrop_url, runtime, genres, tmdb_id',
     'id, name, category, logo_url, primary_url, status, year, rating, lang, views, plot, backdrop_url, runtime, genres, tmdb_id',
     'id, name, category, logo_url, primary_url, status, year, rating, lang, views',
     '*'
@@ -261,12 +276,31 @@ async function loadVod() {
     if (vodCache.rows) { refreshVod().catch(() => {}); return vodCache.rows; } // نُرجع القديم فوراً ونجدّد بالخلفية
     return refreshVod();
 }
-const vodItem = (c) => ({
-    id: c.id, name: c.name, category: c.category, logo_url: c.logo_url, primary_url: c.primary_url,
-    active_url: c.primary_url, year: c.year || null, rating: c.rating == null ? null : Number(c.rating),
-    lang: c.lang || null, views: c.views || 0, status: c.status,
-    plot: c.plot || null, backdrop_url: c.backdrop_url || null, runtime: c.runtime || null, genres: c.genres || null,
-});
+const vodItem = (c) => {
+    const st = linkStatus.get(c.id);
+    return {
+        id: c.id,
+        name: c.name,
+        category: c.category,
+        logo_url: c.logo_url,
+        primary_url: c.primary_url,
+        alt_url_1: c.alt_url_1 || null,
+        alt_url_2: c.alt_url_2 || null,
+        alt_url_3: c.alt_url_3 || null,
+        active_url: (st && st.active_url) || c.primary_url,
+        year: c.year || null,
+        rating: c.rating == null ? null : Number(c.rating),
+        lang: c.lang || null,
+        views: c.views || 0,
+        status: c.status,
+        plot: c.plot || null,
+        backdrop_url: c.backdrop_url || null,
+        runtime: c.runtime || null,
+        genres: c.genres || null,
+        tmdb_id: c.tmdb_id || null,
+    };
+};
+
 // GET /vod?kind=movie|series&cat=&q=&year=&lang=&min_rating=&sort=new|name|views|rating&page=1&limit=60
 app.get(['/vod', '/api/vod'], async (req, res) => {
     try {
@@ -281,11 +315,12 @@ app.get(['/vod', '/api/vod'], async (req, res) => {
             if (c.lang) langs.add(String(c.lang).toLowerCase());
             String(c.genres || '').split(',').forEach(g => { g = g.trim(); if (g) genreSet.add(g); });
         });
-        const cat = String(req.query.cat || ''), q = String(req.query.q || '').trim().toLowerCase();
+        const cat = String(req.query.cat || '');
+        const q = normAr(req.query.q || '');
         const year = parseInt(req.query.year, 10), lang = String(req.query.lang || '').toLowerCase();
         const minRating = parseFloat(req.query.min_rating);
         if (cat) rows = rows.filter(c => c.category === cat);
-        if (q) rows = rows.filter(c => String(c.name || '').toLowerCase().includes(q));
+        if (q) rows = rows.filter(c => normAr(c.name).includes(q) || normAr(c.category).includes(q));
         if (year) rows = rows.filter(c => Number(c.year) === year);
         if (lang) rows = rows.filter(c => String(c.lang || '').toLowerCase() === lang);
         if (minRating) rows = rows.filter(c => Number(c.rating) >= minRating);
@@ -311,6 +346,7 @@ app.get(['/vod', '/api/vod'], async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 });
+
 // GET /vod/rows?kind=movie|series&per=15 — أول عناصر كل باقة بترتيب الباقات في اللوحة (لصفوف تبويبي الأفلام والمسلسلات)
 app.get(['/vod/rows', '/api/vod/rows'], async (req, res) => {
     try {
@@ -498,6 +534,7 @@ app.post(['/channels', '/api/channels'], async (req, res) => {
         const { data, error } = await supabase.from('channels').insert([row]);
 
         if (error) throw error;
+        vodCache.at = 0;
 
         await logAction(operator_name, 'إضافة قناة', `أضاف القناة: ${name}`);
 
@@ -516,6 +553,7 @@ app.post(['/channels/delete-all', '/api/channels/delete-all'], async (req, res) 
         const { error, count } = await supabase.from('channels').delete({ count: 'exact' }).not('id', 'is', null);
         if (error) throw error;
         linkStatus.clear();
+        vodCache = { at: 0, rows: null };
         await logAction(operator_name, 'حذف كل القنوات', `حُذفت ${count == null ? 'كل' : count} قناة`);
         res.json({ success: true, deleted: count });
     } catch (err) {
@@ -538,6 +576,7 @@ app.post(['/channels/bulk-alt', '/api/channels/bulk-alt'], async (req, res) => {
                 error ? fail++ : ok++;
             }));
         }
+        vodCache.at = 0;
         await logAction(operator_name, 'روابط احتياطية', `حُفظ «احتياطي ${n}» لـ ${ok} قناة`);
         res.json({ success: true, updated: ok, failed: fail });
     } catch (err) {
@@ -551,6 +590,7 @@ app.post(['/channels/bulk-category', '/api/channels/bulk-category'], async (req,
         if (!Array.isArray(ids) || !ids.length || !category) return res.status(400).json({ success: false, message: 'حدد القنوات والتصنيف' });
         const { data, error } = await supabase.from('channels').update({ category }).in('id', ids).select('id');
         if (error) throw error;
+        vodCache.at = 0;
         await logAction(operator_name, 'نقل قنوات', `نقل ${data.length} قناة إلى التصنيف: ${category}`);
         res.json({ success: true, updated: data.length });
     } catch (err) {
@@ -572,6 +612,7 @@ app.put(['/channels/:id', '/api/channels/:id'], async (req, res) => {
             .select();
         if (error) throw error;
         if (!data || !data.length) return res.status(404).json({ success: false, message: 'القناة غير موجودة' });
+        vodCache.at = 0;
 
         await logAction(operator_name, 'تعديل قناة', `عدّل القناة: ${name} (ID: ${id})`);
         res.json({ success: true, message: 'تم حفظ التعديل', data });
@@ -589,6 +630,7 @@ app.delete(['/channels/:id', '/api/channels/:id'], async (req, res) => {
         const { data, error } = await supabase.from('channels').delete().eq('id', id).select();
         if (error) throw error;
         if (!data || !data.length) return res.status(404).json({ success: false, message: 'القناة غير موجودة' });
+        vodCache.at = 0;
 
         await logAction(operator_name, 'حذف قناة', `حذف القناة: ${data[0].name} (ID: ${id})`);
         res.json({ success: true, message: 'تم حذف القناة' });
@@ -667,6 +709,7 @@ app.put(['/categories/:id', '/api/categories/:id'], async (req, res) => {
         const { error } = await supabase.from('categories').update({ name: n }).eq('id', id);
         if (error) throw error;
         const { data: moved } = await supabase.from('channels').update({ category: n }).eq('category', cur.name).select('id');
+        vodCache.at = 0;
         await logAction(operator_name, 'تعديل تصنيف', `أعاد تسمية التصنيف «${cur.name}» إلى «${n}» (${moved ? moved.length : 0} قناة)`);
         res.json({ success: true, updated: moved ? moved.length : 0 });
     } catch (err) {
@@ -692,6 +735,7 @@ app.delete(['/categories/:id', '/api/categories/:id'], async (req, res) => {
                 if (!g || !g.length) await supabase.from('categories').insert([{ name: 'عامة' }]);
             }
         }
+        vodCache.at = 0;
         await logAction(operator_name, 'حذف تصنيف', `حذف التصنيف «${cat.name}» (نُقلت ${moved} قناة إلى «عامة»)`);
         res.json({ success: true, message: 'تم حذف التصنيف بنجاح', moved });
     } catch (err) {
@@ -929,8 +973,6 @@ app.post(['/admin/reset-device', '/api/admin/reset-device'], async (req, res) =>
 });
 
 // 6.2 فحص سلامة روابط البث — فحص حقيقي (HLS + جلب مقطع فعلي) في ملف health-check.js
-//     يسجّل النتائج في جدول channel_health_logs ويضيف /admin/check-stream لفحص قناة واحدة
-// تجميع سجلات الفحص: سطر واحد كل 10 دقائق لكل مشغل بدل سطر لكل قناة (يمنع امتلاء سجل العمليات)
 const auditThrottle = new Map();
 registerHealthRoutes(app, {
     getChannels: async () => {
@@ -1114,7 +1156,6 @@ app.get(['/api/stats', '/stats'], async (req, res) => {
         const totalCodes = codesData.length;
         const activeCodes = codesData.filter(c => !c.is_blocked && !isExpired(c)).length;
         const blockedCodes = codesData.filter(c => c.is_blocked).length;
-        // رقم حقيقي: عدد الأجهزة التي سجّلت نشاطاً مؤخراً (بدل الرقم العشوائي السابق)
         let recentlyActive = codesData.filter(c =>
             !c.is_blocked && c.last_login_at && new Date(c.last_login_at).getTime() >= since).length;
         const { data: live, error: liveErr } = await supabase.from('code_devices').select('id').gte('last_seen', new Date(since).toISOString());
@@ -1363,6 +1404,7 @@ app.post(['/channels/bulk', '/api/channels/bulk'], async (req, res) => {
             ({ error } = await supabase.from('channels').insert(rows.map(({ logo_url, tvg_id, year, rating, lang, ...rest }) => rest)));
         }
         if (error) throw error;
+        vodCache.at = 0;
         await logAction(operator_name, 'استيراد قنوات', `${rows.length} قناة (دفعة)`);
         res.json({ success: true, created: rows.length });
     } catch (err) {
@@ -1388,6 +1430,7 @@ app.post(['/admin/fetch-logos', '/api/admin/fetch-logos'], async (req, res) => {
             }));
         }
         if (hits.length && !updated && firstErr) throw new Error(firstErr.message + ' — تأكد من وجود عمود logo_url في جدول channels');
+        vodCache.at = 0;
         await logAction(req.body.operator_name, 'جلب الشعارات', `حُدّث ${updated} من ${todo.length} قناة`);
         res.json({ success: true, total: rows.length, checked: todo.length, matched: hits.length, updated });
     } catch (err) {
@@ -1407,6 +1450,7 @@ app.post(['/channels/set-status', '/api/channels/set-status'], async (req, res) 
             if (error) throw error;
             n += data.length;
         }
+        vodCache.at = 0;
         await logAction(operator_name, status === 'hidden' ? 'إخفاء قنوات' : 'إظهار قنوات', `${n} قناة`);
         res.json({ success: true, updated: n });
     } catch (err) {
