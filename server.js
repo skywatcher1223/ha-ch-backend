@@ -643,11 +643,16 @@ app.delete(['/channels/:id', '/api/channels/:id'], async (req, res) => {
 // 2. مسارات التصنيفات (Categories)
 app.get(['/categories', '/api/categories'], async (req, res) => {
     try {
-        // الترتيب: sort_order (إن وُجد العمود) ثم id
-        let r = await supabase.from('categories').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
-        if (r.error) r = await supabase.from('categories').select('*').order('id', { ascending: true });
-        if (r.error) throw r.error;
-        res.json({ success: true, data: r.data });
+        let rows;
+        try {
+            rows = await fetchAll(() => supabase.from('categories').select('*')
+                .order('sort_order', { ascending: true, nullsFirst: false })
+                .order('id', { ascending: true }));
+        } catch (e) {
+            // العمود sort_order غير موجود بعد
+            rows = await fetchAll(() => supabase.from('categories').select('*').order('id', { ascending: true }));
+        }
+        res.json({ success: true, data: rows });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
