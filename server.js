@@ -336,7 +336,11 @@ app.get(['/vod/rows', '/api/vod/rows'], async (req, res) => {
             by.set(c.category, a);
         });
         let order = [];
-        try { const { data } = await supabase.from('categories').select('name').order('id'); order = (data || []).map(x => x.name); } catch (e) {}
+        try {
+            let r = await supabase.from('categories').select('name').order('sort_order', { ascending: true, nullsFirst: false }).order('id');
+            if (r.error) r = await supabase.from('categories').select('name').order('id');
+            order = (r.data || []).map(x => x.name);
+        } catch (e) {}
         const pos = (n) => { const k = order.indexOf(n); return k < 0 ? 100000 : k; };
         const out = [...by].map(([category, items]) => ({ category, count: counts.get(category), items: items.map(vodItem) }))
             .sort((a, b) => pos(a.category) - pos(b.category) || b.count - a.count);
@@ -639,9 +643,11 @@ app.delete(['/channels/:id', '/api/channels/:id'], async (req, res) => {
 // 2. مسارات التصنيفات (Categories)
 app.get(['/categories', '/api/categories'], async (req, res) => {
     try {
-        const { data, error } = await supabase.from('categories').select('*');
-        if (error) throw error;
-        res.json({ success: true, data });
+        // الترتيب: sort_order (إن وُجد العمود) ثم id
+        let r = await supabase.from('categories').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('id', { ascending: true });
+        if (r.error) r = await supabase.from('categories').select('*').order('id', { ascending: true });
+        if (r.error) throw r.error;
+        res.json({ success: true, data: r.data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -663,6 +669,29 @@ app.post(['/categories', '/api/categories'], async (req, res) => {
         res.json({ success: true, message: 'تم إضافة التصنيف بنجاح', data });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post(['/categories/reorder', '/api/categories/reorder'], async (req, res) => {
+    try {
+        const { ids, operator_name } = req.body || {};
+        if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ success: false, message: 'قائمة الترتيب فارغة' });
+        const list = [...new Set(ids.map(Number).filter(Number.isFinite))];
+        // نتحقق أولاً من وجود عمود sort_order حتى لا نترك الترتيب نصف محفوظ
+        const probe = await supabase.from('categories').select('sort_order').limit(1);
+        if (probe.error) return res.status(400).json({ success: false, message: 'نفّذ في Supabase: alter table categories add column if not exists sort_order int;' });
+        let ok = 0, failed = 0;
+        for (let i = 0; i < list.length; i += 10) {
+            await Promise.all(list.slice(i, i + 10).map(async (id, k) => {
+                const { error } = await supabase.from('categories').update({ sort_order: i + k + 1 }).eq('id', id);
+                error ? failed++ : ok++;
+            }));
+        }
+        vodCache.at = 0;
+        await logAction(operator_name, 'ترتيب التصنيفات', `أعاد ترتيب ${ok} تصنيف`);
+        res.json({ success: true, updated: ok, failed });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
