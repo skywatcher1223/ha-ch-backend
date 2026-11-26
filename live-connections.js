@@ -13,6 +13,17 @@ const GEO_FAIL_TTL_MS = 10 * 60 * 1000;    // وعند الفشل نعيد ال�
 const cleanIp = (ip) => String(ip || '').replace(/^::ffff:/i, '').trim();
 const isPrivate = (ip) => !ip || /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|::1$|f[cd][0-9a-f]{2}:|fe80:)/i.test(ip);
 
+// IP الحقيقي للجهاز: خلف بروكسي Render يكون req.ip عنوانًا داخليًا (10.x)، لذلك نقرأ الترويسات أولًا
+function clientIp(req) {
+    const h = req.headers || {};
+    const cands = [h['cf-connecting-ip'], h['true-client-ip'], h['x-real-ip'],
+        ...String(h['x-forwarded-for'] || '').split(','), req.ip, req.socket && req.socket.remoteAddress]
+        .map(cleanIp).filter(Boolean);
+    return cands.find(ip => !isPrivate(ip)) || cands[0] || '';
+}
+// يفضّل أول IP عام من القائمة، وإلا أول قيمة موجودة
+const pickIp = (...c) => c.find(ip => ip && !isPrivate(ip)) || c.find(Boolean) || '';
+
 module.exports = function registerLiveConnections(app, { supabase }) {
     const meta = new Map(); // "codeId:deviceId" -> { ip, ua, at }
     const geo = new Map();  // ip -> { at, ttl, v }
@@ -21,7 +32,7 @@ module.exports = function registerLiveConnections(app, { supabase }) {
     app.post(['/heartbeat', '/api/heartbeat'], (req, res, next) => {
         try {
             if (req.device) meta.set(req.device.cid + ':' + req.device.did, {
-                ip: cleanIp(req.ip), ua: String(req.headers['user-agent'] || '').slice(0, 300), at: Date.now()
+                ip: clientIp(req), ua: String(req.headers['user-agent'] || '').slice(0, 300), at: Date.now()
             });
         } catch (e) {}
         next();
@@ -71,7 +82,7 @@ module.exports = function registerLiveConnections(app, { supabase }) {
 
             const rows = devs.map(d => {
                 const k = d.code_id + ':' + d.device_id, m = meta.get(k), c = codeMap.get(d.code_id) || {};
-                return { d, c, ip: (m && m.ip) || loginIp.get(k) || '', ua: (m && m.ua) || '' };
+                return { d, c, ip: pickIp(m && m.ip, loginIp.get(k)), ua: (m && m.ua) || '' };
             });
 
             const ips = [...new Set(rows.map(r => r.ip).filter(ip => ip && !isPrivate(ip)))];
