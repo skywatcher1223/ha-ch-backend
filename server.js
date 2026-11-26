@@ -23,8 +23,8 @@ app.use(cors({
 }));
 
 // ================= المصادقة =================
-const ADMIN_KEY = process.env.ADMIN_KEY;       // مفتاح المدير من إعدادات البيئة فقط
-const AUTH_SECRET = process.env.AUTH_SECRET;   // سر توقيع الجلسات من إعدادات البيئة فقط
+const ADMIN_KEY = 'HA_TV_ADMIN_chaouki_1920'; // المفتاح الرئيسي للمدير (يُكتب في خانة اسم المستخدم)
+const AUTH_SECRET = 'OYy1yHjmCZogGn5p1LSyFgnKlGapUAJobsqHYwwxPD6BZLEd'; // سر توقيع التوكن (نص عشوائي طويل)
 if (!ADMIN_KEY || !AUTH_SECRET) {
     console.error('❌ يجب ضبط ADMIN_KEY و AUTH_SECRET في متغيرات البيئة (Render → Environment).');
     process.exit(1);
